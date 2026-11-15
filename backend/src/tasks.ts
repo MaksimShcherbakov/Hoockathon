@@ -9,6 +9,7 @@ function taskText(value: unknown, limit: number, required: boolean): string {
   const label = required ? "Название" : "Описание";
   if (typeof value !== "string") throw new HttpError(400, label + " должно быть текстом");
   const text = value.trim();
+  if (text.includes("\0")) throw new HttpError(400, label + " содержит недопустимый символ");
   if (required && !text) throw new HttpError(400, "Введите название задачи");
   if (text.length > limit) throw new HttpError(400, `${label}: максимум ${limit} символов`);
   return text;

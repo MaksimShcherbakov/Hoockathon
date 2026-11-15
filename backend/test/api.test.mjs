@@ -1,18 +1,17 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../dist/generated/client.js";
 
 const base = "http://127.0.0.1:3000/api";
 
-function request(path, { method = "GET", body, cookie, origin } = {}) {
-  const headers = {};
+function request(path, { method = "GET", body, rawBody, cookie, origin, headers = {} } = {}) {
   if (cookie) headers.Cookie = cookie;
   if (origin) headers.Origin = origin;
   if (body !== undefined) headers["Content-Type"] = "application/json";
 
-  return fetch(base + path, { method, headers, body: JSON.stringify(body) });
+  return fetch(base + path, { method, headers, body: rawBody ?? JSON.stringify(body) });
 }
 
 function sessionCookie(response) {
@@ -71,6 +70,61 @@ test("accounts, sessions and task lifecycle with owner isolation", async () => {
   } finally {
     try {
       await db.user.deleteMany({ where: { email: { in: [primary.email, other.email] } } });
+    } finally {
+      await db.$disconnect();
+    }
+  }
+});
+
+test("invalid input is rejected without changing stored tasks; expired sessions are denied", async () => {
+  const account = { email: randomUUID() + "@example.test", password: "test-password" };
+  const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) });
+  async function expectError(response, status) {
+    assert.equal(response.status, status);
+    assert.equal(typeof (await response.json()).error, "string");
+  }
+
+  try {
+    for (const route of ["/register", "/login"]) {
+      for (const email of ["bad", "a\0b@example.test", "a\u0001b@example.test"]) {
+        await expectError(await request(route, { method: "POST", body: { ...account, email } }), 400);
+      }
+    }
+    const registered = await request("/register", { method: "POST", body: account });
+    assert.equal(registered.status, 201);
+    const cookie = sessionCookie(registered);
+    const headers = { "Content-Type": "application/json" };
+    for (const rawBody of ["{", "null", "[]", '"text"']) {
+      await expectError(await request("/tasks", { method: "POST", cookie, rawBody, headers }), 400);
+    }
+    await expectError(await request("/tasks", { method: "POST", cookie, rawBody: "{}" }), 415);
+    await expectError(await request("/tasks", { method: "POST", cookie, body: { title: "x".repeat(33000) } }), 413);
+    for (const body of [
+      { title: "a\0b" }, { title: "valid", description: "a\0b" },
+      { title: 1 }, { title: "" }, { title: "x".repeat(121) },
+      { title: "valid", description: null }, { title: "valid", description: "x".repeat(2001) },
+    ]) {
+      await expectError(await request("/tasks", { method: "POST", cookie, body }), 400);
+    }
+    assert.deepEqual(await (await request("/tasks", { cookie })).json(), []);
+    const created = await request("/tasks", {
+      method: "POST", cookie, body: { title: "x".repeat(120), description: "я".repeat(2000) },
+    });
+    assert.equal(created.status, 201);
+    const task = await created.json();
+    for (const body of [{}, { completed: "true" }, { title: "a\0b" }, { description: "a\0b", completed: true }]) {
+      await expectError(await request("/tasks/" + task.id, { method: "PATCH", cookie, body }), 400);
+    }
+    assert.deepEqual(await (await request("/tasks", { cookie })).json(), [task]);
+    await expectError(await request("/tasks/not-a-uuid", { method: "DELETE", cookie }), 404);
+    const tokenHash = createHash("sha256").update(cookie.slice("session=".length)).digest("hex");
+    await db.session.update({ where: { tokenHash }, data: { expiresAt: new Date(0) } });
+    await expectError(await request("/me", { cookie }), 401);
+    await expectError(await request("/tasks", { cookie }), 401);
+    await expectError(await request("/tasks/" + task.id, { method: "PATCH", cookie, body: { completed: true } }), 401);
+  } finally {
+    try {
+      await db.user.deleteMany({ where: { email: account.email } });
     } finally {
       await db.$disconnect();
     }

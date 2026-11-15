@@ -54,7 +54,7 @@ export async function authenticate(
   const body = await readJson(request);
   const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
   const password = body.password;
-  if (email.length > 254 || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+  if (email.length > 254 || /[\u0000-\u001f\u007f]/.test(email) || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
     throw new HttpError(400, "Введите корректный email");
   }
   if (typeof password !== "string" || password.length < 8 || password.length > 128) {
