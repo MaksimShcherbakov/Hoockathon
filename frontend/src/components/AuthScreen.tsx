@@ -12,6 +12,7 @@ export default function AuthScreen({ onAuth }: Props) {
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -22,6 +23,10 @@ export default function AuthScreen({ onAuth }: Props) {
 
     if (mode === "register" && password.length < 8) {
       setError("Пароль должен содержать не менее 8 символов.");
+      return;
+    }
+    if (mode === "register" && password !== confirmPassword) {
+      setError("Пароли не совпадают.");
       return;
     }
 
@@ -88,6 +93,23 @@ export default function AuthScreen({ onAuth }: Props) {
           )}
         </label>
 
+        {mode === "register" && (
+          <label className="flex flex-col gap-1 text-sm font-medium">
+            Повторите пароль
+            <input
+              type="password"
+              name="confirmPassword"
+              autoComplete="new-password"
+              required
+              disabled={busy}
+              maxLength={128}
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              className="min-h-11 rounded-lg border border-stone-300 bg-white px-3 text-base"
+            />
+          </label>
+        )}
+
         {error && (
           <p role="alert" className="text-sm text-red-700">
             {error}
@@ -108,6 +130,7 @@ export default function AuthScreen({ onAuth }: Props) {
         disabled={busy}
         onClick={() => {
           setMode(mode === "login" ? "register" : "login");
+          setConfirmPassword("");
           setError(null);
         }}
         className="mt-4 min-h-11 text-sm text-accent underline-offset-2 hover:underline"
