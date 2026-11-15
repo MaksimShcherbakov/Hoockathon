@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { Plus } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { ApiError, createTask, deleteTask, getTasks, updateTask } from "../api";
 import type { Task, User } from "../types";
 import TaskItem from "./TaskItem";
@@ -11,52 +11,82 @@ interface Props {
   onSessionExpired: () => void;
 }
 
+const PAGE_SIZE = 20;
+
 export default function TaskList({ user, onLogout, onSessionExpired }: Props) {
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
-  const [attempt, setAttempt] = useState(0);
+  const [mutating, setMutating] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Task | null>(null);
   const dialogTrigger = useRef<HTMLButtonElement | null>(null);
+  const headingRef = useRef<HTMLHeadingElement | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const actionsDisabled = loading || loadFailed || mutating || loggingOut;
+
+  // Cancel stale loads; remember the target so retry reloads the failed page.
+  const loadPage = useCallback(
+    (target: number) => {
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+      setPage(target);
+      setLoading(true);
+      setLoadFailed(false);
+      setError(null);
+      getTasks(target, PAGE_SIZE, controller.signal)
+        .then((data) => {
+          if (controller.signal.aborted) return;
+          setTasks(data.items);
+          setPage(data.page);
+          setTotalPages(data.totalPages);
+          setTotal(data.total);
+        })
+        .catch((err) => {
+          if (controller.signal.aborted) return;
+          if (err instanceof ApiError && err.status === 401) onSessionExpired();
+          else setLoadFailed(true);
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setLoading(false);
+        });
+    },
+    [onSessionExpired],
+  );
 
   useEffect(() => {
-    let active = true;
-    getTasks()
-      .then((data) => {
-        if (active) setTasks(data);
-      })
-      .catch((err) => {
-        if (!active) return;
-        if (err instanceof ApiError && err.status === 401) onSessionExpired();
-        else setLoadFailed(true);
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [onSessionExpired, attempt]);
+    loadPage(1);
+    return () => abortRef.current?.abort();
+  }, [loadPage]);
 
   function openEditor(task: Task | null, trigger: HTMLButtonElement) {
+    if (actionsDisabled) return;
     dialogTrigger.current = trigger;
     setEditing(task);
     setDialogOpen(true);
   }
 
   async function handleSubmit(values: { title: string; description: string }) {
+    if (loggingOut) return;
     try {
       if (editing) {
+        // Update in place: stay on the current page.
         const updated = await updateTask(editing.id, values);
         setTasks((prev) => prev.map((task) => (task.id === updated.id ? updated : task)));
+        setDialogOpen(false);
       } else {
-        const created = await createTask(values.title, values.description);
-        setTasks((prev) => [created, ...prev]);
+        await createTask(values.title, values.description);
+        // Mutation succeeded: close the dialog first, then refresh. A failed
+        // reload surfaces independently and never marks the save as failed.
+        setDialogOpen(false);
+        loadPage(1);
       }
-      setDialogOpen(false);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) onSessionExpired();
       else throw err;
@@ -69,27 +99,37 @@ export default function TaskList({ user, onLogout, onSessionExpired }: Props) {
   }
 
   async function handleToggle(task: Task) {
+    if (actionsDisabled) return;
     setError(null);
+    setMutating(true);
     try {
       const updated = await updateTask(task.id, { completed: !task.completed });
       setTasks((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
     } catch (err) {
       showError(err, "Не удалось обновить задачу.");
+    } finally {
+      setMutating(false);
     }
   }
 
   async function handleDelete(task: Task) {
+    if (actionsDisabled) return;
     if (!window.confirm(`Удалить задачу «${task.title}»?`)) return;
     setError(null);
+    setMutating(true);
     try {
       await deleteTask(task.id);
-      setTasks((prev) => prev.filter((item) => item.id !== task.id));
+      // Refresh the current page; the backend clamps if the last row is gone.
+      loadPage(page);
     } catch (err) {
       showError(err, "Не удалось удалить задачу.");
+    } finally {
+      setMutating(false);
     }
   }
 
   async function handleLogout() {
+    if (loading || mutating || loggingOut) return;
     setError(null);
     setLoggingOut(true);
     try {
@@ -104,12 +144,12 @@ export default function TaskList({ user, onLogout, onSessionExpired }: Props) {
     <main className="mx-auto w-full max-w-2xl px-4 py-8 sm:py-12">
       <header className="mb-6 flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-3xl font-semibold tracking-tight">Мои задачи</h1>
+          <h1 ref={headingRef} tabIndex={-1} className="text-3xl font-semibold tracking-tight outline-none">Мои задачи</h1>
           <p className="mt-1 truncate text-sm text-stone-600" title={user.email}>{user.email}</p>
         </div>
         <button
           type="button"
-          disabled={loggingOut}
+          disabled={loading || loggingOut || mutating}
           onClick={handleLogout}
           className="min-h-11 shrink-0 rounded-lg px-3 text-sm font-medium text-stone-700 hover:bg-stone-100 disabled:opacity-60"
         >
@@ -119,7 +159,7 @@ export default function TaskList({ user, onLogout, onSessionExpired }: Props) {
 
       <button
         type="button"
-        disabled={loading || loadFailed}
+        disabled={actionsDisabled}
         onClick={(event) => openEditor(null, event.currentTarget)}
         className="mb-6 flex min-h-11 items-center justify-center gap-2 rounded-lg bg-accent px-4 font-medium text-white hover:bg-accent-hover disabled:opacity-60"
       >
@@ -129,44 +169,98 @@ export default function TaskList({ user, onLogout, onSessionExpired }: Props) {
 
       {error && <p role="alert" className="mb-4 text-sm text-red-700">{error}</p>}
 
-      {loading ? (
+      {total > 0 ? (
+        // Once a page has loaded, keep the list and nav mounted across reloads
+        // so keyboard focus is not lost on every navigation. Controls lock while
+        // a load, mutation, logout or failed reload is outstanding.
+        <>
+          <ul className="flex flex-col gap-2" aria-busy={loading}>
+            {tasks.map((task) => (
+              <TaskItem
+                key={task.id}
+                task={task}
+                disabled={actionsDisabled}
+                onToggle={handleToggle}
+                onEdit={openEditor}
+                onDelete={handleDelete}
+              />
+            ))}
+          </ul>
+
+          <nav
+            aria-label="Навигация по страницам"
+            className="mt-6 flex items-center justify-between gap-3"
+          >
+            <button
+              type="button"
+              disabled={actionsDisabled || page <= 1}
+              onClick={() => loadPage(page - 1)}
+              className="flex min-h-11 items-center gap-1 rounded-lg px-3 text-sm font-medium text-stone-700 hover:bg-stone-100 disabled:opacity-60"
+            >
+              <ChevronLeft size={18} aria-hidden />
+              Назад
+            </button>
+
+            <p className="text-sm text-stone-600" role="status" aria-live="polite">
+              {loading
+                ? "Обновление…"
+                : loadFailed
+                  ? "Не удалось обновить список."
+                  : `Страница ${page} из ${totalPages} · всего ${total}`}
+            </p>
+
+            <button
+              type="button"
+              disabled={actionsDisabled || page >= totalPages}
+              onClick={() => loadPage(page + 1)}
+              className="flex min-h-11 items-center gap-1 rounded-lg px-3 text-sm font-medium text-stone-700 hover:bg-stone-100 disabled:opacity-60"
+            >
+              Вперёд
+              <ChevronRight size={18} aria-hidden />
+            </button>
+          </nav>
+
+          {loadFailed && (
+            <button
+              type="button"
+              disabled={loggingOut}
+              onClick={() => loadPage(page)}
+              className="mt-3 min-h-11 rounded-lg px-4 font-medium text-accent hover:bg-stone-100"
+            >
+              Повторить
+            </button>
+          )}
+        </>
+      ) : loading ? (
         <p className="text-stone-600" role="status">Загрузка…</p>
       ) : loadFailed ? (
         <div>
           <p role="alert" className="mb-2 text-sm text-red-700">Не удалось загрузить задачи.</p>
           <button
             type="button"
-            onClick={() => {
-              setLoading(true);
-              setLoadFailed(false);
-              setAttempt((value) => value + 1);
-            }}
+            disabled={loggingOut}
+            onClick={() => loadPage(page)}
             className="min-h-11 rounded-lg px-4 font-medium text-accent hover:bg-stone-100"
           >
             Повторить
           </button>
         </div>
-      ) : tasks.length === 0 ? (
-        !error && <p className="text-stone-600">Задач пока нет. Добавьте первую.</p>
       ) : (
-        <ul className="flex flex-col gap-2">
-          {tasks.map((task) => (
-            <TaskItem
-              key={task.id}
-              task={task}
-              onToggle={handleToggle}
-              onEdit={openEditor}
-              onDelete={handleDelete}
-            />
-          ))}
-        </ul>
+        !error && <p className="text-stone-600">Задач пока нет. Добавьте первую.</p>
       )}
 
       <TaskDialog
         open={dialogOpen}
         task={editing}
         onOpenChange={setDialogOpen}
-        restoreFocus={() => dialogTrigger.current?.focus()}
+        restoreFocus={() => {
+          // The Add trigger is disabled during the post-create reload, so a
+          // disabled/missing trigger falls back to the heading to keep focus in
+          // the document. Edit triggers stay usable and are restored as before.
+          const trigger = dialogTrigger.current;
+          if (trigger && !trigger.disabled) trigger.focus();
+          else headingRef.current?.focus();
+        }}
         onSubmit={handleSubmit}
       />
     </main>

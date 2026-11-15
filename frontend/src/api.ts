@@ -1,4 +1,4 @@
-import type { Task, User } from "./types";
+import type { Page, Task, User } from "./types";
 
 export class ApiError extends Error {
   constructor(readonly status: number, message: string) {
@@ -64,8 +64,14 @@ export function logout(): Promise<void> {
   return request<void>("/logout", { method: "POST" });
 }
 
-export function getTasks(): Promise<Task[]> {
-  return request<Task[]>("/tasks");
+export function getTasks(
+  page = 1,
+  pageSize = 20,
+  signal?: AbortSignal,
+): Promise<Page<Task>> {
+  return request<Page<Task>>(`/tasks?page=${page}&pageSize=${pageSize}`, {
+    signal,
+  });
 }
 
 export function createTask(title: string, description: string): Promise<Task> {

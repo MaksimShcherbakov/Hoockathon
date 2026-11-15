@@ -4,6 +4,7 @@ import type { Task } from "../types";
 
 interface Props {
   task: Task;
+  disabled?: boolean;
   onToggle: (task: Task) => Promise<void>;
   onEdit: (task: Task, trigger: HTMLButtonElement) => void;
   onDelete: (task: Task) => Promise<void>;
@@ -14,10 +15,14 @@ const dateFormatter = new Intl.DateTimeFormat("ru-RU", {
   timeStyle: "short",
 });
 
-export default function TaskItem({ task, onToggle, onEdit, onDelete }: Props) {
+export default function TaskItem({ task, disabled = false, onToggle, onEdit, onDelete }: Props) {
   const [busy, setBusy] = useState(false);
+  // A mutation anywhere in the list locks every row; local busy covers the
+  // brief gap before the parent flag flips.
+  const locked = busy || disabled;
 
   async function run(action: (task: Task) => Promise<void>) {
+    if (locked) return;
     setBusy(true);
     try {
       await action(task);
@@ -32,7 +37,7 @@ export default function TaskItem({ task, onToggle, onEdit, onDelete }: Props) {
         <input
           type="checkbox"
           checked={task.completed}
-          disabled={busy}
+          disabled={locked}
           onChange={() => void run(onToggle)}
           aria-label={`Выполнена: ${task.title}`}
           className="size-5 accent-accent"
@@ -56,7 +61,7 @@ export default function TaskItem({ task, onToggle, onEdit, onDelete }: Props) {
       <div className="flex shrink-0">
         <button
           type="button"
-          disabled={busy}
+          disabled={locked}
           onClick={(event) => onEdit(task, event.currentTarget)}
           aria-label={`Редактировать: ${task.title}`}
           className="flex size-11 items-center justify-center rounded-lg text-stone-600 hover:bg-stone-100 disabled:opacity-60"
@@ -65,7 +70,7 @@ export default function TaskItem({ task, onToggle, onEdit, onDelete }: Props) {
         </button>
         <button
           type="button"
-          disabled={busy}
+          disabled={locked}
           onClick={() => void run(onDelete)}
           aria-label={`Удалить: ${task.title}`}
           className="flex size-11 items-center justify-center rounded-lg text-stone-600 hover:bg-stone-100 disabled:opacity-60"

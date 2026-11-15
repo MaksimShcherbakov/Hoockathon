@@ -5,6 +5,16 @@ import { HttpError, readJson, send } from "./http.js";
 const taskFields = { id: true, title: true, description: true, createdAt: true, completed: true } as const;
 const taskPath = /^\/api\/tasks\/([a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12})$/i;
 
+function pageParameter(params: URLSearchParams, name: string, fallback: number, max: number): number {
+  const values = params.getAll(name);
+  if (!values.length) return fallback;
+  const value = Number(values[0]);
+  if (values.length !== 1 || !/^[1-9]\d*$/.test(values[0]) || !Number.isSafeInteger(value) || value > max) {
+    throw new HttpError(400, `Некорректный параметр ${name}`);
+  }
+  return value;
+}
+
 function taskText(value: unknown, limit: number, required: boolean): string {
   const label = required ? "Название" : "Описание";
   if (typeof value !== "string") throw new HttpError(400, label + " должно быть текстом");
@@ -23,12 +33,24 @@ export async function tasks(
   userId: string,
 ) {
   if (path === "/api/tasks" && request.method === "GET") {
-    const list = await db.task.findMany({
-      where: { userId },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      select: taskFields,
-    });
-    return send(response, 200, list);
+    const params = new URL(request.url ?? path, "http://localhost").searchParams;
+    const requestedPage = pageParameter(params, "page", 1, Number.MAX_SAFE_INTEGER);
+    const pageSize = pageParameter(params, "pageSize", 20, 100);
+    const result = await db.$transaction(async (tx) => {
+      const where = { userId };
+      const total = await tx.task.count({ where });
+      const totalPages = Math.max(1, Math.ceil(total / pageSize));
+      const page = Math.min(requestedPage, totalPages);
+      const items = await tx.task.findMany({
+        where,
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: taskFields,
+      });
+      return { items, page, pageSize, total, totalPages };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    return send(response, 200, result);
   }
 
   if (path === "/api/tasks" && request.method === "POST") {
