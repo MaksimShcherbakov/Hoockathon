@@ -14,6 +14,12 @@ interface Props {
 
 const PAGE_SIZE = 20;
 
+// The single modal that may be open. `edit` with a null task is the create flow.
+type ActiveModal =
+  | { kind: "none" }
+  | { kind: "edit"; task: Task | null }
+  | { kind: "delete"; task: Task };
+
 export default function TaskList({ user, onLogout, onSessionExpired }: Props) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [page, setPage] = useState(1);
@@ -24,15 +30,22 @@ export default function TaskList({ user, onLogout, onSessionExpired }: Props) {
   const [mutating, setMutating] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editing, setEditing] = useState<Task | null>(null);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [deleting, setDeleting] = useState<Task | null>(null);
-  const dialogTrigger = useRef<HTMLButtonElement | null>(null);
-  const deleteTrigger = useRef<HTMLButtonElement | null>(null);
+  const [modal, setModal] = useState<ActiveModal>({ kind: "none" });
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const headingRef = useRef<HTMLHeadingElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const actionsDisabled = loading || loadFailed || mutating || loggingOut;
+
+  const closeModal = useCallback(() => setModal({ kind: "none" }), []);
+
+  // Return focus to the control that opened the modal when it is still in the
+  // document and usable; otherwise its row/trigger is gone or disabled during a
+  // reload, so fall back to the heading to keep focus in the document.
+  const restoreFocus = useCallback(() => {
+    const trigger = triggerRef.current;
+    if (trigger && trigger.isConnected && !trigger.disabled) trigger.focus();
+    else headingRef.current?.focus();
+  }, []);
 
   // Cancel stale loads; remember the target so retry reloads the failed page.
   const loadPage = useCallback(
@@ -71,24 +84,24 @@ export default function TaskList({ user, onLogout, onSessionExpired }: Props) {
 
   function openEditor(task: Task | null, trigger: HTMLButtonElement) {
     if (actionsDisabled) return;
-    dialogTrigger.current = trigger;
-    setEditing(task);
-    setDialogOpen(true);
+    triggerRef.current = trigger;
+    setModal({ kind: "edit", task });
   }
 
   async function handleSubmit(values: { title: string; description: string }) {
     if (loggingOut) return;
+    const editing = modal.kind === "edit" ? modal.task : null;
     try {
       if (editing) {
         // Update in place: stay on the current page.
         const updated = await updateTask(editing.id, values);
         setTasks((prev) => prev.map((task) => (task.id === updated.id ? updated : task)));
-        setDialogOpen(false);
+        closeModal();
       } else {
         await createTask(values.title, values.description);
         // Mutation succeeded: close the dialog first, then refresh. A failed
         // reload surfaces independently and never marks the save as failed.
-        setDialogOpen(false);
+        closeModal();
         loadPage(1);
       }
     } catch (err) {
@@ -120,13 +133,12 @@ export default function TaskList({ user, onLogout, onSessionExpired }: Props) {
   // request; the DELETE only fires once the user confirms.
   function openDelete(task: Task, trigger: HTMLButtonElement) {
     if (actionsDisabled) return;
-    deleteTrigger.current = trigger;
-    setDeleting(task);
-    setDeleteOpen(true);
+    triggerRef.current = trigger;
+    setModal({ kind: "delete", task });
   }
 
   async function confirmDelete() {
-    const task = deleting;
+    const task = modal.kind === "delete" ? modal.task : null;
     if (!task) return;
     setError(null);
     setMutating(true);
@@ -146,7 +158,7 @@ export default function TaskList({ user, onLogout, onSessionExpired }: Props) {
     // Deletion succeeded: close first, then refresh the current page. The
     // backend clamps if the last row is gone, and a failed reload surfaces
     // independently without resending the deletion or faking a delete failure.
-    setDeleteOpen(false);
+    closeModal();
     loadPage(page);
   }
 
@@ -271,33 +283,24 @@ export default function TaskList({ user, onLogout, onSessionExpired }: Props) {
         !error && <p className="text-stone-600">Задач пока нет. Добавьте первую.</p>
       )}
 
+      {/* Both dialogs stay mounted so Radix runs its closing/focus lifecycle. */}
       <TaskDialog
-        open={dialogOpen}
-        task={editing}
-        onOpenChange={setDialogOpen}
-        restoreFocus={() => {
-          // The Add trigger is disabled during the post-create reload, so a
-          // disabled/missing trigger falls back to the heading to keep focus in
-          // the document. Edit triggers stay usable and are restored as before.
-          const trigger = dialogTrigger.current;
-          if (trigger && !trigger.disabled) trigger.focus();
-          else headingRef.current?.focus();
+        open={modal.kind === "edit"}
+        task={modal.kind === "edit" ? modal.task : null}
+        onOpenChange={(next) => {
+          if (!next) closeModal();
         }}
+        restoreFocus={restoreFocus}
         onSubmit={handleSubmit}
       />
 
       <DeleteTaskDialog
-        open={deleteOpen}
-        task={deleting}
-        onOpenChange={setDeleteOpen}
-        restoreFocus={() => {
-          // Restore focus to the originating delete button when it is still in
-          // the document and usable; after a successful deletion/reload its row
-          // is gone, so fall back to the heading to keep focus in the document.
-          const trigger = deleteTrigger.current;
-          if (trigger && trigger.isConnected && !trigger.disabled) trigger.focus();
-          else headingRef.current?.focus();
+        open={modal.kind === "delete"}
+        task={modal.kind === "delete" ? modal.task : null}
+        onOpenChange={(next) => {
+          if (!next) closeModal();
         }}
+        restoreFocus={restoreFocus}
         onConfirm={confirmDelete}
       />
     </main>
