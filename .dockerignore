@@ -1,0 +1,7 @@
+.git
+**/node_modules
+**/dist
+output
+.playwright-cli
+backend/src/generated
+docker-compose.override.yml
