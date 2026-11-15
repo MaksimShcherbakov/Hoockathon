@@ -221,38 +221,46 @@ export default function TaskList({ user, onLogout, onSessionExpired }: Props) {
             ))}
           </ul>
 
-          <nav
-            aria-label="Навигация по страницам"
-            className="mt-6 flex items-center justify-between gap-3"
-          >
-            <button
-              type="button"
-              disabled={actionsDisabled || page <= 1}
-              onClick={() => loadPage(page - 1)}
-              className="flex min-h-11 items-center gap-1 rounded-lg px-3 text-sm font-medium text-stone-700 hover:bg-stone-100 disabled:opacity-60"
+          {totalPages > 1 && (
+            <nav
+              aria-label="Навигация по страницам"
+              className="mt-6 flex items-center justify-between gap-3"
             >
-              <ChevronLeft size={18} aria-hidden />
-              Назад
-            </button>
+              <button
+                type="button"
+                disabled={actionsDisabled || page <= 1}
+                onClick={() => loadPage(page - 1)}
+                className="flex min-h-11 items-center gap-1 rounded-lg px-3 text-sm font-medium text-stone-700 hover:bg-stone-100 disabled:opacity-60"
+              >
+                <ChevronLeft size={18} aria-hidden />
+                Назад
+              </button>
 
-            <p className="text-sm text-stone-600" role="status" aria-live="polite">
-              {loading
-                ? "Обновление…"
-                : loadFailed
-                  ? "Не удалось обновить список."
-                  : `Страница ${page} из ${totalPages} · всего ${total}`}
+              <p className="text-sm text-stone-600" role="status" aria-live="polite">
+                {loading
+                  ? "Обновление…"
+                  : loadFailed
+                    ? "Не удалось обновить список."
+                    : `Страница ${page} из ${totalPages} · всего ${total}`}
+              </p>
+
+              <button
+                type="button"
+                disabled={actionsDisabled || page >= totalPages}
+                onClick={() => loadPage(page + 1)}
+                className="flex min-h-11 items-center gap-1 rounded-lg px-3 text-sm font-medium text-stone-700 hover:bg-stone-100 disabled:opacity-60"
+              >
+                Вперёд
+                <ChevronRight size={18} aria-hidden />
+              </button>
+            </nav>
+          )}
+
+          {totalPages === 1 && (loading || loadFailed) && (
+            <p className="mt-6 text-sm text-stone-600" role={loadFailed ? "alert" : "status"}>
+              {loadFailed ? "Не удалось обновить список." : "Обновление…"}
             </p>
-
-            <button
-              type="button"
-              disabled={actionsDisabled || page >= totalPages}
-              onClick={() => loadPage(page + 1)}
-              className="flex min-h-11 items-center gap-1 rounded-lg px-3 text-sm font-medium text-stone-700 hover:bg-stone-100 disabled:opacity-60"
-            >
-              Вперёд
-              <ChevronRight size={18} aria-hidden />
-            </button>
-          </nav>
+          )}
 
           {loadFailed && (
             <button
