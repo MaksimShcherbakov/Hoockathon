@@ -13,8 +13,15 @@ const scheme = process.env.COOKIE_SECURE === "true" ? "https" : "http";
 const allowedOrigins = new Set(
   ["localhost", "127.0.0.1"].map((host) => new URL(`${scheme}://${host}:${appPort}`).origin),
 );
+let activeRequests = 0;
+let afterDrain: (() => void) | undefined;
 
 const server = createServer(async (request, response) => {
+  activeRequests++;
+  response.once("finish", () => {
+    // An active keep-alive socket may become idle after close() swept the pool.
+    if (stopping) setImmediate(() => server.closeIdleConnections());
+  });
   response.setHeader("Cache-Control", "no-store");
   response.setHeader("X-Content-Type-Options", "nosniff");
   try {
@@ -47,7 +54,33 @@ const server = createServer(async (request, response) => {
     }
     console.error("Ошибка обработки запроса", error instanceof Error ? error.name : "Unknown");
     send(response, 500, { error: "Ошибка сервера" });
+  } finally {
+    activeRequests--;
+    if (activeRequests === 0) afterDrain?.();
   }
 });
 
 server.listen(Number(process.env.PORT ?? 3000), "0.0.0.0");
+
+let stopping = false;
+function shutdown() {
+  if (stopping) return;
+  stopping = true;
+  // Finish active requests before disconnecting Prisma, but do not let a stalled
+  // client hold up container shutdown indefinitely.
+  const deadline = setTimeout(() => process.exit(1), 5000);
+  deadline.unref();
+  server.close(() => {
+    const disconnect = () => {
+      void db.$disconnect().then(() => clearTimeout(deadline)).catch(() => {
+        console.error("Не удалось закрыть соединения с базой данных");
+        process.exitCode = 1;
+      });
+    };
+    // Socket closure alone does not finish a handler whose client disconnected.
+    if (activeRequests === 0) disconnect();
+    else afterDrain = disconnect;
+  });
+}
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
