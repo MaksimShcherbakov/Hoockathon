@@ -21,6 +21,32 @@ function sessionCookie(response) {
   return cookie.split(";")[0];
 }
 
+test("successful authentication replaces only the presented session; failures preserve it", async () => {
+  const primary = { email: randomUUID() + "@example.test", password: "test-password" };
+  const other = { email: randomUUID() + "@example.test", password: "test-password" };
+  const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) });
+  try {
+    const original = sessionCookie(await request("/register", { method: "POST", body: primary }));
+    const separate = sessionCookie(await request("/login", { method: "POST", body: primary }));
+    assert.equal((await request("/login", { method: "POST", cookie: original,
+      body: { ...primary, password: "wrong-password" } })).status, 401);
+    assert.equal((await request("/register", { method: "POST", cookie: original, body: primary })).status, 409);
+    assert.equal((await request("/me", { cookie: original })).status, 200);
+    const replacement = sessionCookie(await request("/login", { method: "POST", cookie: original, body: primary }));
+    assert.notEqual(replacement, original);
+    assert.equal((await request("/me", { cookie: original })).status, 401);
+    assert.equal((await request("/me", { cookie: replacement })).status, 200);
+    assert.equal((await request("/me", { cookie: separate })).status, 200);
+    const registered = sessionCookie(await request("/register", { method: "POST", cookie: replacement, body: other }));
+    assert.equal((await request("/me", { cookie: replacement })).status, 401);
+    assert.deepEqual(await (await request("/me", { cookie: registered })).json(), { email: other.email });
+    assert.equal((await request("/me", { cookie: separate })).status, 200);
+  } finally {
+    await db.user.deleteMany({ where: { email: { in: [primary.email, other.email] } } });
+    await db.$disconnect();
+  }
+});
+
 test("accounts, sessions and task lifecycle with owner isolation", async () => {
   const primary = { email: randomUUID() + "@example.test", password: "test-password" };
   const other = { email: randomUUID() + "@example.test", password: "test-password" };

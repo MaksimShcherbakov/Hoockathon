@@ -9,8 +9,9 @@ const connectionString = process.env.DATABASE_URL;
 if (!connectionString) throw new Error("DATABASE_URL is required");
 const db = new PrismaClient({ adapter: new PrismaPg({ connectionString, connectionTimeoutMillis: 5000 }) });
 const appPort = process.env.APP_PORT ?? "8080";
+const scheme = process.env.COOKIE_SECURE === "true" ? "https" : "http";
 const allowedOrigins = new Set(
-  ["localhost", "127.0.0.1"].map((host) => new URL(`http://${host}:${appPort}`).origin),
+  ["localhost", "127.0.0.1"].map((host) => new URL(`${scheme}://${host}:${appPort}`).origin),
 );
 
 const server = createServer(async (request, response) => {

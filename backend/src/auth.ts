@@ -4,7 +4,9 @@ import { Prisma, type PrismaClient } from "./generated/client.js";
 import { HttpError, readJson, send } from "./http.js";
 
 const sessionSeconds = 7 * 24 * 60 * 60;
-const cookieFlags = "Path=/; HttpOnly; SameSite=Strict";
+const secureCookie = process.env.COOKIE_SECURE === "true";
+const cookieName = secureCookie ? "__Host-session" : "session";
+const cookieFlags = "Path=/; HttpOnly; SameSite=Strict" + (secureCookie ? "; Secure" : "");
 const dummyHash = randomBytes(64).toString("hex");
 let passwordChecks = 0;
 
@@ -28,8 +30,9 @@ function hashToken(token: string): string {
 }
 
 function sessionHash(request: IncomingMessage): string | undefined {
-  const token = /(?:^|;\s*)session=([a-f0-9]{64})(?:;|$)/.exec(request.headers.cookie ?? "")?.[1];
-  return token ? hashToken(token) : undefined;
+  const token = request.headers.cookie?.split(";").map((part) => part.trim())
+    .find((part) => part.startsWith(cookieName + "="))?.slice(cookieName.length + 1);
+  return token && /^[a-f0-9]{64}$/.test(token) ? hashToken(token) : undefined;
 }
 
 export async function currentUser(db: PrismaClient, request: IncomingMessage) {
@@ -62,6 +65,7 @@ export async function authenticate(
   }
 
   const token = randomBytes(32).toString("hex");
+  const previous = sessionHash(request);
   const session = {
     tokenHash: hashToken(token),
     expiresAt: new Date(Date.now() + sessionSeconds * 1000),
@@ -71,9 +75,12 @@ export async function authenticate(
     const salt = randomBytes(16).toString("hex");
     const key = await deriveKey(password, salt);
     try {
-      await db.user.create({
-        data: { email, passwordHash: salt + ":" + key.toString("hex"), sessions: { create: session } },
-        select: { id: true },
+      await db.$transaction(async (tx) => {
+        await tx.user.create({
+          data: { email, passwordHash: salt + ":" + key.toString("hex"), sessions: { create: session } },
+          select: { id: true },
+        });
+        if (previous) await tx.session.deleteMany({ where: { tokenHash: previous } });
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
@@ -89,18 +96,21 @@ export async function authenticate(
       throw new HttpError(401, "Неверный email или пароль");
     }
     await db.$transaction([
-      db.session.deleteMany({ where: { userId: user.id, expiresAt: { lte: new Date() } } }),
+      db.session.deleteMany({ where: { OR: [
+        { userId: user.id, expiresAt: { lte: new Date() } },
+        ...(previous ? [{ tokenHash: previous }] : []),
+      ] } }),
       db.session.create({ data: { ...session, userId: user.id } }),
     ]);
   }
 
-  response.setHeader("Set-Cookie", `session=${token}; ${cookieFlags}; Max-Age=${sessionSeconds}`);
+  response.setHeader("Set-Cookie", `${cookieName}=${token}; ${cookieFlags}; Max-Age=${sessionSeconds}`);
   send(response, register ? 201 : 200, { email });
 }
 
 export async function logout(db: PrismaClient, request: IncomingMessage, response: ServerResponse) {
   const tokenHash = sessionHash(request);
   if (tokenHash) await db.session.deleteMany({ where: { tokenHash } });
-  response.setHeader("Set-Cookie", `session=; ${cookieFlags}; Max-Age=0`);
+  response.setHeader("Set-Cookie", `${cookieName}=; ${cookieFlags}; Max-Age=0`);
   send(response, 204);
 }
