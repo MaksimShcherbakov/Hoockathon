@@ -17,7 +17,7 @@ function request(path, { method = "GET", body, rawBody, cookie, origin, headers:
 
 function sessionCookie(response) {
   const cookie = response.headers.get("set-cookie");
-  assert.match(cookie, /^session=[a-f0-9]{64}; Path=\/; HttpOnly; SameSite=Strict;/);
+  assert.match(cookie, /^session=[\w-]+\.[\w-]+\.[\w-]+; Path=\/; HttpOnly; SameSite=Strict;/);
   return cookie.split(";")[0];
 }
 

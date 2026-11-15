@@ -1,9 +1,9 @@
-import { createHash, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID, scrypt, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Prisma, type PrismaClient } from "./generated/client.js";
 import { HttpError, readJson, send } from "./http.js";
+import { issueToken, sessionSeconds, verifyToken } from "./jwt.js";
 
-const sessionSeconds = 7 * 24 * 60 * 60;
 const secureCookie = process.env.COOKIE_SECURE === "true";
 const cookieName = secureCookie ? "__Host-session" : "session";
 const cookieFlags = "Path=/; HttpOnly; SameSite=Strict" + (secureCookie ? "; Secure" : "");
@@ -29,18 +29,24 @@ function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
-function sessionHash(request: IncomingMessage): string | undefined {
+function sessionToken(request: IncomingMessage): string | undefined {
   const token = request.headers.cookie?.split(";").map((part) => part.trim())
     .find((part) => part.startsWith(cookieName + "="))?.slice(cookieName.length + 1);
-  return token && /^[a-f0-9]{64}$/.test(token) ? hashToken(token) : undefined;
+  return token && token.length <= 2048 && /^[\w-]+\.[\w-]+\.[\w-]+$/.test(token) ? token : undefined;
 }
 
 export async function currentUser(db: PrismaClient, request: IncomingMessage) {
-  const tokenHash = sessionHash(request);
-  if (!tokenHash) throw new HttpError(401, "Войдите в аккаунт");
+  const token = sessionToken(request);
+  if (!token) throw new HttpError(401, "Войдите в аккаунт");
+  let userId: string;
+  try {
+    userId = await verifyToken(token);
+  } catch {
+    throw new HttpError(401, "Войдите в аккаунт");
+  }
 
   const session = await db.session.findUnique({
-    where: { tokenHash, expiresAt: { gt: new Date() } },
+    where: { tokenHash: hashToken(token), userId, expiresAt: { gt: new Date() } },
     select: { user: { select: { id: true, email: true } } },
   });
   if (!session) throw new HttpError(401, "Войдите в аккаунт");
@@ -64,20 +70,21 @@ export async function authenticate(
     throw new HttpError(400, "Пароль должен содержать от 8 до 128 символов");
   }
 
-  const token = randomBytes(32).toString("hex");
-  const previous = sessionHash(request);
-  const session = {
-    tokenHash: hashToken(token),
-    expiresAt: new Date(Date.now() + sessionSeconds * 1000),
-  };
+  const previousToken = sessionToken(request);
+  const previous = previousToken ? hashToken(previousToken) : undefined;
+  let token: string;
 
   if (register) {
     const salt = randomBytes(16).toString("hex");
     const key = await deriveKey(password, salt);
+    const id = randomUUID();
+    const issued = await issueToken(id);
+    token = issued.token;
+    const session = { tokenHash: hashToken(token), expiresAt: issued.expiresAt };
     try {
       await db.$transaction(async (tx) => {
         await tx.user.create({
-          data: { email, passwordHash: salt + ":" + key.toString("hex"), sessions: { create: session } },
+          data: { id, email, passwordHash: salt + ":" + key.toString("hex"), sessions: { create: session } },
           select: { id: true },
         });
         if (previous) await tx.session.deleteMany({ where: { tokenHash: previous } });
@@ -95,6 +102,9 @@ export async function authenticate(
     if (!timingSafeEqual(key, Buffer.from(hash, "hex")) || !user) {
       throw new HttpError(401, "Неверный email или пароль");
     }
+    const issued = await issueToken(user.id);
+    token = issued.token;
+    const session = { tokenHash: hashToken(token), expiresAt: issued.expiresAt };
     await db.$transaction([
       db.session.deleteMany({ where: { OR: [
         { userId: user.id, expiresAt: { lte: new Date() } },
@@ -109,8 +119,8 @@ export async function authenticate(
 }
 
 export async function logout(db: PrismaClient, request: IncomingMessage, response: ServerResponse) {
-  const tokenHash = sessionHash(request);
-  if (tokenHash) await db.session.deleteMany({ where: { tokenHash } });
+  const token = sessionToken(request);
+  if (token) await db.session.deleteMany({ where: { tokenHash: hashToken(token) } });
   response.setHeader("Set-Cookie", `${cookieName}=; ${cookieFlags}; Max-Age=0`);
   send(response, 204);
 }

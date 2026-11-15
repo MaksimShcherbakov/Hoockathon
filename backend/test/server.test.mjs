@@ -36,7 +36,7 @@ test("secure cookie mode and graceful server shutdown", { timeout: 15000 }, asyn
     const response = await fetch(base + "/register", { method: "POST", headers, body });
     assert.equal(response.status, 201);
     const cookie = response.headers.get("set-cookie");
-    assert.match(cookie, /^__Host-session=[a-f0-9]{64}; Path=\/; HttpOnly; SameSite=Strict; Secure; Max-Age=604800$/);
+    assert.match(cookie, /^__Host-session=[\w-]+\.[\w-]+\.[\w-]+; Path=\/; HttpOnly; SameSite=Strict; Secure; Max-Age=604800$/);
     const session = cookie.split(";")[0];
     assert.equal((await fetch(base + "/me", { headers: { Cookie: session } })).status, 200);
     // HTTP-mode cookies must not authenticate the HTTPS configuration.
