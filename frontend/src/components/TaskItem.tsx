@@ -7,7 +7,7 @@ interface Props {
   disabled?: boolean;
   onToggle: (task: Task) => Promise<void>;
   onEdit: (task: Task, trigger: HTMLButtonElement) => void;
-  onDelete: (task: Task) => Promise<void>;
+  onDelete: (task: Task, trigger: HTMLButtonElement) => void;
 }
 
 const dateFormatter = new Intl.DateTimeFormat("ru-RU", {
@@ -71,7 +71,7 @@ export default function TaskItem({ task, disabled = false, onToggle, onEdit, onD
         <button
           type="button"
           disabled={locked}
-          onClick={() => void run(onDelete)}
+          onClick={(event) => onDelete(task, event.currentTarget)}
           aria-label={`Удалить: ${task.title}`}
           className="flex size-11 items-center justify-center rounded-lg text-stone-600 hover:bg-stone-100 disabled:opacity-60"
         >

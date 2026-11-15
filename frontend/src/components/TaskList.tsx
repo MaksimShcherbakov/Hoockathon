@@ -4,6 +4,7 @@ import { ApiError, createTask, deleteTask, getTasks, updateTask } from "../api";
 import type { Task, User } from "../types";
 import TaskItem from "./TaskItem";
 import TaskDialog from "./TaskDialog";
+import DeleteTaskDialog from "./DeleteTaskDialog";
 
 interface Props {
   user: User;
@@ -25,7 +26,10 @@ export default function TaskList({ user, onLogout, onSessionExpired }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Task | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState<Task | null>(null);
   const dialogTrigger = useRef<HTMLButtonElement | null>(null);
+  const deleteTrigger = useRef<HTMLButtonElement | null>(null);
   const headingRef = useRef<HTMLHeadingElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const actionsDisabled = loading || loadFailed || mutating || loggingOut;
@@ -112,20 +116,38 @@ export default function TaskList({ user, onLogout, onSessionExpired }: Props) {
     }
   }
 
-  async function handleDelete(task: Task) {
+  // Opening the confirmation does not touch the row's busy state or send any
+  // request; the DELETE only fires once the user confirms.
+  function openDelete(task: Task, trigger: HTMLButtonElement) {
     if (actionsDisabled) return;
-    if (!window.confirm(`Удалить задачу «${task.title}»?`)) return;
+    deleteTrigger.current = trigger;
+    setDeleting(task);
+    setDeleteOpen(true);
+  }
+
+  async function confirmDelete() {
+    const task = deleting;
+    if (!task) return;
     setError(null);
     setMutating(true);
     try {
       await deleteTask(task.id);
-      // Refresh the current page; the backend clamps if the last row is gone.
-      loadPage(page);
     } catch (err) {
-      showError(err, "Не удалось удалить задачу.");
+      // 401 defers to the shared session handling; other failures bubble up so
+      // the dialog stays open with an inline error and the user can retry.
+      if (err instanceof ApiError && err.status === 401) {
+        onSessionExpired();
+        return;
+      }
+      throw err;
     } finally {
       setMutating(false);
     }
+    // Deletion succeeded: close first, then refresh the current page. The
+    // backend clamps if the last row is gone, and a failed reload surfaces
+    // independently without resending the deletion or faking a delete failure.
+    setDeleteOpen(false);
+    loadPage(page);
   }
 
   async function handleLogout() {
@@ -182,7 +204,7 @@ export default function TaskList({ user, onLogout, onSessionExpired }: Props) {
                 disabled={actionsDisabled}
                 onToggle={handleToggle}
                 onEdit={openEditor}
-                onDelete={handleDelete}
+                onDelete={openDelete}
               />
             ))}
           </ul>
@@ -262,6 +284,21 @@ export default function TaskList({ user, onLogout, onSessionExpired }: Props) {
           else headingRef.current?.focus();
         }}
         onSubmit={handleSubmit}
+      />
+
+      <DeleteTaskDialog
+        open={deleteOpen}
+        task={deleting}
+        onOpenChange={setDeleteOpen}
+        restoreFocus={() => {
+          // Restore focus to the originating delete button when it is still in
+          // the document and usable; after a successful deletion/reload its row
+          // is gone, so fall back to the heading to keep focus in the document.
+          const trigger = deleteTrigger.current;
+          if (trigger && trigger.isConnected && !trigger.disabled) trigger.focus();
+          else headingRef.current?.focus();
+        }}
+        onConfirm={confirmDelete}
       />
     </main>
   );

@@ -21,8 +21,23 @@ export default function AuthScreen({ onAuth }: Props) {
     if (busy) return;
     setError(null);
 
-    if (mode === "register" && password.length < 8) {
-      setError("Пароль должен содержать не менее 8 символов.");
+    // Inline checks replace the browser's native constraint bubbles; they mirror
+    // the field attributes and the backend stays the authority on the result.
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      setError("Укажите адрес эл. почты.");
+      return;
+    }
+    if (trimmedEmail.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      setError("Введите корректный адрес эл. почты.");
+      return;
+    }
+    if (!password) {
+      setError("Укажите пароль.");
+      return;
+    }
+    if (password.length < 8 || password.length > 128) {
+      setError("Пароль должен содержать от 8 до 128 символов.");
       return;
     }
     if (mode === "register" && password !== confirmPassword) {
@@ -34,8 +49,8 @@ export default function AuthScreen({ onAuth }: Props) {
     try {
       const user =
         mode === "register"
-          ? await register(email, password)
-          : await login(email, password);
+          ? await register(trimmedEmail, password)
+          : await login(trimmedEmail, password);
       onAuth(user);
     } catch (err) {
       setError(
@@ -54,7 +69,7 @@ export default function AuthScreen({ onAuth }: Props) {
         {mode === "login" ? "Вход" : "Регистрация"}
       </h1>
 
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+      <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
         <label className="flex flex-col gap-1 text-sm font-medium">
           Эл. почта
           <input
