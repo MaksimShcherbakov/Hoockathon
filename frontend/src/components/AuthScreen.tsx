@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { Eye, EyeOff } from "lucide-react";
 import { ApiError, login, register } from "../api";
 import type { User } from "../types";
 
@@ -13,8 +14,18 @@ export default function AuthScreen({ onAuth }: Props) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  function switchMode() {
+    setMode(mode === "login" ? "register" : "login");
+    setConfirmPassword("");
+    setShowPassword(false);
+    setShowConfirmPassword(false);
+    setError(null);
+  }
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -85,44 +96,81 @@ export default function AuthScreen({ onAuth }: Props) {
           />
         </label>
 
-        <label className="flex flex-col gap-1 text-sm font-medium">
-          Пароль
-          <input
-            type="password"
-            name="password"
-            autoComplete={
-              mode === "register" ? "new-password" : "current-password"
-            }
-            required
-            disabled={busy}
-            minLength={mode === "register" ? 8 : undefined}
-            maxLength={128}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="min-h-11 rounded-lg border border-stone-300 bg-white px-3 text-base"
-          />
+        <div className="flex flex-col gap-1 text-sm font-medium">
+          <label htmlFor="password">Пароль</label>
+          <div className="relative">
+            <input
+              id="password"
+              type={showPassword ? "text" : "password"}
+              name="password"
+              autoComplete={
+                mode === "register" ? "new-password" : "current-password"
+              }
+              required
+              disabled={busy}
+              minLength={mode === "register" ? 8 : undefined}
+              maxLength={128}
+              aria-describedby={mode === "register" ? "password-hint" : undefined}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="min-h-11 w-full rounded-lg border border-stone-300 bg-white pl-3 pr-12 text-base"
+            />
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setShowPassword((v) => !v)}
+              aria-label={showPassword ? "Скрыть пароль" : "Показать пароль"}
+              className="absolute inset-y-0 right-0 flex min-h-11 min-w-11 items-center justify-center text-stone-500 disabled:opacity-60"
+            >
+              {showPassword ? (
+                <EyeOff aria-hidden="true" className="size-5" />
+              ) : (
+                <Eye aria-hidden="true" className="size-5" />
+              )}
+            </button>
+          </div>
           {mode === "register" && (
-            <span className="text-xs font-normal text-stone-500">
+            <span id="password-hint" className="text-xs font-normal text-stone-500">
               От 8 до 128 символов.
             </span>
           )}
-        </label>
+        </div>
 
         {mode === "register" && (
-          <label className="flex flex-col gap-1 text-sm font-medium">
-            Повторите пароль
-            <input
-              type="password"
-              name="confirmPassword"
-              autoComplete="new-password"
-              required
-              disabled={busy}
-              maxLength={128}
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              className="min-h-11 rounded-lg border border-stone-300 bg-white px-3 text-base"
-            />
-          </label>
+          <div className="flex flex-col gap-1 text-sm font-medium">
+            <label htmlFor="confirmPassword">Повторите пароль</label>
+            <div className="relative">
+              <input
+                id="confirmPassword"
+                type={showConfirmPassword ? "text" : "password"}
+                name="confirmPassword"
+                autoComplete="new-password"
+                required
+                disabled={busy}
+                maxLength={128}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                className="min-h-11 w-full rounded-lg border border-stone-300 bg-white pl-3 pr-12 text-base"
+              />
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setShowConfirmPassword((v) => !v)}
+                aria-label={
+                  showConfirmPassword
+                    ? "Скрыть подтверждение пароля"
+                    : "Показать подтверждение пароля"
+                }
+                className="absolute inset-y-0 right-0 flex min-h-11 min-w-11 items-center justify-center text-stone-500 disabled:opacity-60"
+              >
+                {showConfirmPassword ? (
+                  <EyeOff aria-hidden="true" className="size-5" />
+                ) : (
+                  <Eye aria-hidden="true" className="size-5" />
+                )}
+              </button>
+            </div>
+          </div>
         )}
 
         {error && (
@@ -143,11 +191,7 @@ export default function AuthScreen({ onAuth }: Props) {
       <button
         type="button"
         disabled={busy}
-        onClick={() => {
-          setMode(mode === "login" ? "register" : "login");
-          setConfirmPassword("");
-          setError(null);
-        }}
+        onClick={switchMode}
         className="mt-4 min-h-11 text-sm text-accent underline-offset-2 hover:underline"
       >
         {mode === "login"
