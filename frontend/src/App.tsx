@@ -12,6 +12,7 @@ type State =
 
 export default function App() {
   const [state, setState] = useState<State>({ status: "loading" });
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -33,7 +34,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [attempt]);
 
   const endSession = useCallback(() => setState({ status: "anonymous" }), []);
 
@@ -52,10 +53,20 @@ export default function App() {
 
   if (state.status === "error") {
     return (
-      <main className="mx-auto flex min-h-screen max-w-md items-center justify-center px-4">
+      <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-4 px-4">
         <p role="alert" className="text-red-700">
           {state.message}
         </p>
+        <button
+          type="button"
+          onClick={() => {
+            setState({ status: "loading" });
+            setAttempt((value) => value + 1);
+          }}
+          className="min-h-11 rounded-lg bg-accent px-4 font-medium text-white hover:bg-accent-hover"
+        >
+          Повторить
+        </button>
       </main>
     );
   }

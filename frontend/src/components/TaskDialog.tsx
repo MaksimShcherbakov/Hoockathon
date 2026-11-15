@@ -87,6 +87,7 @@ export default function TaskDialog({
               <input
                 type="text"
                 required
+                disabled={busy}
                 maxLength={120}
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
@@ -97,6 +98,7 @@ export default function TaskDialog({
             <label className="flex flex-col gap-1 text-sm font-medium">
               Описание
               <textarea
+                disabled={busy}
                 maxLength={2000}
                 rows={4}
                 value={description}

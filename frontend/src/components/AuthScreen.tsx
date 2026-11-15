@@ -57,6 +57,7 @@ export default function AuthScreen({ onAuth }: Props) {
             name="email"
             autoComplete="email"
             required
+            disabled={busy}
             maxLength={254}
             value={email}
             onChange={(e) => setEmail(e.target.value)}
@@ -73,6 +74,7 @@ export default function AuthScreen({ onAuth }: Props) {
               mode === "register" ? "new-password" : "current-password"
             }
             required
+            disabled={busy}
             minLength={mode === "register" ? 8 : undefined}
             maxLength={128}
             value={password}

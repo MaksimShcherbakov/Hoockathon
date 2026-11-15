@@ -14,6 +14,8 @@ interface Props {
 export default function TaskList({ user, onLogout, onSessionExpired }: Props) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [loggingOut, setLoggingOut] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -29,7 +31,7 @@ export default function TaskList({ user, onLogout, onSessionExpired }: Props) {
       .catch((err) => {
         if (!active) return;
         if (err instanceof ApiError && err.status === 401) onSessionExpired();
-        else setError("Не удалось загрузить задачи.");
+        else setLoadFailed(true);
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -37,7 +39,7 @@ export default function TaskList({ user, onLogout, onSessionExpired }: Props) {
     return () => {
       active = false;
     };
-  }, [onSessionExpired]);
+  }, [onSessionExpired, attempt]);
 
   function openEditor(task: Task | null, trigger: HTMLButtonElement) {
     dialogTrigger.current = trigger;
@@ -117,7 +119,7 @@ export default function TaskList({ user, onLogout, onSessionExpired }: Props) {
 
       <button
         type="button"
-        disabled={loading}
+        disabled={loading || loadFailed}
         onClick={(event) => openEditor(null, event.currentTarget)}
         className="mb-6 flex min-h-11 items-center justify-center gap-2 rounded-lg bg-accent px-4 font-medium text-white hover:bg-accent-hover disabled:opacity-60"
       >
@@ -129,6 +131,21 @@ export default function TaskList({ user, onLogout, onSessionExpired }: Props) {
 
       {loading ? (
         <p className="text-stone-600" role="status">Загрузка…</p>
+      ) : loadFailed ? (
+        <div>
+          <p role="alert" className="mb-2 text-sm text-red-700">Не удалось загрузить задачи.</p>
+          <button
+            type="button"
+            onClick={() => {
+              setLoading(true);
+              setLoadFailed(false);
+              setAttempt((value) => value + 1);
+            }}
+            className="min-h-11 rounded-lg px-4 font-medium text-accent hover:bg-stone-100"
+          >
+            Повторить
+          </button>
+        </div>
       ) : tasks.length === 0 ? (
         !error && <p className="text-stone-600">Задач пока нет. Добавьте первую.</p>
       ) : (
